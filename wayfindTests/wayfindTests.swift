@@ -9,6 +9,75 @@ import Foundation
 import Testing
 @testable import wayfind
 
+// MARK: - Alias table
+
+struct AliasTableTests {
+    private let mc304 = UUID()
+    private let md21 = UUID()
+    private let md22 = UUID()
+
+    private func makeTable() -> AliasTable {
+        AliasTable(buildingID: UUID(), entries: [
+            .init(imdfUnitID: mc304, registrarCode: "ENGMC 304", signVariants: ["MC 304", "304"], labelFR: "Salle 304"),
+            .init(imdfUnitID: md21, registrarCode: "MD 21", signVariants: ["MD 21-22"], labelFR: nil),
+            .init(imdfUnitID: md22, registrarCode: "MD 22", signVariants: ["MD 21-22"], labelFR: nil),
+        ])
+    }
+
+    @Test func normalizationIgnoresFormatting() {
+        #expect(AliasTable.normalize("engmc-304") == AliasTable.normalize("ENGMC 304"))
+        #expect(AliasTable.normalize("MD 0021") == AliasTable.normalize("MD21"))
+        #expect(AliasTable.normalize("Salle É-12") == AliasTable.normalize("SALLE E12"))
+        #expect(AliasTable.normalize("MD 0") == "MD0")
+    }
+
+    @Test func registrarCodeResolvesUniquely() {
+        guard case .unique(let entry) = makeTable().resolve("engmc304") else {
+            Issue.record("expected a unique match")
+            return
+        }
+        #expect(entry.imdfUnitID == mc304)
+    }
+
+    @Test func signVariantResolvesToSameUnit() {
+        guard case .unique(let entry) = makeTable().resolve("MC 304") else {
+            Issue.record("expected a unique match")
+            return
+        }
+        #expect(entry.imdfUnitID == mc304)
+    }
+
+    @Test func sharedSignIsAmbiguous() {
+        guard case .ambiguous(let entries) = makeTable().resolve("MD 21-22") else {
+            Issue.record("expected an ambiguous match")
+            return
+        }
+        #expect(Set(entries.map(\.imdfUnitID)) == [md21, md22])
+    }
+
+    @Test func registrarCodeBeatsSharedSign() {
+        guard case .unique(let entry) = makeTable().resolve("MD 21") else {
+            Issue.record("expected a unique match")
+            return
+        }
+        #expect(entry.imdfUnitID == md21)
+    }
+
+    @Test func unknownAndEmptyInputAreNotFound() {
+        #expect(makeTable().resolve("XYZ 999") == .notFound)
+        #expect(makeTable().resolve("  ") == .notFound)
+    }
+
+    @Test func jsonRoundTripUsesSnakeCaseKeys() throws {
+        let table = makeTable()
+        let data = try JSONEncoder().encode(table)
+        let json = String(decoding: data, as: UTF8.self)
+        #expect(json.contains("registrar_code"))
+        #expect(json.contains("sign_variants"))
+        #expect(try JSONDecoder().decode(AliasTable.self, from: data) == table)
+    }
+}
+
 // MARK: - Navigation graph
 
 struct NavigationGraphTests {
